@@ -6,6 +6,11 @@ import dur
 
 app = FastAPI()
 
+# ✅ [추가됨] 접속 테스트용 대문 (브라우저 접속 시 404 방지)
+@app.get("/")
+def read_root():
+    return {"status": "ONLINE", "message": "DUR 분석 서버가 정상 작동 중입니다."}
+
 # == 요청 모델 정의 ==
 class MultiDrugRequest(BaseModel):
     drug_names: List[str]  # 예: ["타이레놀", "이소티논"]
