@@ -1,5 +1,6 @@
 import requests
 import re
+from urllib.parse import unquote  # ✅ [추가] 키 디코딩 도구
 
 # ==========================================
 # 설정 및 API 키
@@ -220,6 +221,8 @@ NUTRIENT_DB = {
     }
 }
 
+# [주의] 위 NUTRIENT_DB에 님 원본 데이터가 다 들어가 있어야 합니다!
+
 # ==========================================
 # 도구 함수
 # ==========================================
@@ -232,9 +235,17 @@ def clean_drug_name(name):
     return name.strip()
 
 def get_ingredient_api(drug_name):
-    params = {'serviceKey': SERVICE_KEY, 'pageNo': '1', 'numOfRows': '1', 'type': 'json', 'item_name': drug_name}
+    # ✅ [수정] unquote 적용 및 timeout 추가
+    params = {
+        'serviceKey': unquote(SERVICE_KEY), 
+        'pageNo': '1', 
+        'numOfRows': '1', 
+        'type': 'json', 
+        'item_name': drug_name
+    }
     try:
-        res = requests.get(URL_SEARCH, params=params)
+        # 5초 안에 응답 없으면 끊기
+        res = requests.get(URL_SEARCH, params=params, timeout=5)
         items = res.json().get('body', {}).get('items', [])
         if items:
             full_name = items[0].get('ITEM_NAME', '')
@@ -242,23 +253,29 @@ def get_ingredient_api(drug_name):
             if match: return match.group(1)
             else: return clean_drug_name(full_name)
         return clean_drug_name(drug_name)
-    except:
+    except Exception as e:
+        print(f"API Error ({drug_name}): {e}") # 로그 출력
         return drug_name
 
 # ==========================================
-# [기능 1] 상호작용 체크 (데이터만 리턴)
+# [기능 1] 상호작용 체크
 # ==========================================
 def check_interaction_pair(drug_A, drug_B):
     clean_A = clean_drug_name(get_ingredient_api(drug_A))
     clean_B = clean_drug_name(get_ingredient_api(drug_B))
     
+    # ✅ [수정] unquote 적용 및 timeout 추가
     params = {
-        'serviceKey': SERVICE_KEY, 'pageNo': '1', 'numOfRows': '100', 'type': 'json', 
+        'serviceKey': unquote(SERVICE_KEY), 
+        'pageNo': '1', 
+        'numOfRows': '100', 
+        'type': 'json', 
         'ingrKorName': clean_A
     }
     
     try:
-        res = requests.get(URL_DUR, params=params)
+        # DUR 서버는 느릴 수 있으니 10초 대기
+        res = requests.get(URL_DUR, params=params, timeout=10)
         items = res.json().get('body', {}).get('items', [])
         
         if items:
@@ -268,34 +285,32 @@ def check_interaction_pair(drug_A, drug_B):
                 taboo_clean = clean_drug_name(taboo_name)
                 
                 if taboo_clean and (clean_B in taboo_clean or taboo_clean in clean_B):
-                    # 멘트 빼고 핵심 데이터만 보냄
                     return {
                         "status": "DANGER",
                         "pair": [drug_A, drug_B],
                         "cause": f"{real_data.get('INGR_KOR_NAME')} + {taboo_name}", 
-                        "content": real_data.get('PROHBT_CONTENT') # "2주간 금지" 같은 원본 데이터
+                        "content": real_data.get('PROHBT_CONTENT')
                     }
         return {"status": "SAFE"}
     except Exception as e:
+        print(f"DUR API Error: {e}") # 로그 출력
         return {"status": "ERROR", "msg": str(e)}
 
 # ==========================================
-# [기능 2] 영양소 체크 (데이터만 리턴)
+# [기능 2] 영양소 체크
 # ==========================================
 def check_nutrient_data(drug_name):
-    """
-    약 이름을 받아서 영양소 정보를 찾으면 데이터 리턴, 없으면 None 리턴
-    """
+    # 여기에도 API 호출이 있으니 간접적으로 영향 받음 (get_ingredient_api 사용)
     ingr = clean_drug_name(get_ingredient_api(drug_name))
-    info = NUTRIENT_DB.get(ingr) # 딕셔너리 검색
+    info = NUTRIENT_DB.get(ingr)
     
     if info:
         return {
             "found": True,
             "ingredient": ingr,
-            "depletion": info['depletion'], # 결핍 영양소 리스트
-            "avoid": info['avoid'],         # 피해야 할 것 리스트
-            "foods": info['foods']          # 추천 음식 리스트
+            "depletion": info['depletion'],
+            "avoid": info['avoid'],
+            "foods": info['foods']
         }
     else:
         return {
