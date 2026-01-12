@@ -1,6 +1,6 @@
 import requests
 import re
-from urllib.parse import unquote  # ✅ [추가] 키 디코딩 도구
+from urllib.parse import unquote
 
 # ==========================================
 # 설정 및 API 키
@@ -221,8 +221,6 @@ NUTRIENT_DB = {
     }
 }
 
-# [주의] 위 NUTRIENT_DB에 님 원본 데이터가 다 들어가 있어야 합니다!
-
 # ==========================================
 # 도구 함수
 # ==========================================
@@ -235,7 +233,9 @@ def clean_drug_name(name):
     return name.strip()
 
 def get_ingredient_api(drug_name):
-    # ✅ [수정] unquote 적용 및 timeout 추가
+    """
+    약 이름을 받아 {성분명, 분류명}을 반환합니다.
+    """
     params = {
         'serviceKey': unquote(SERVICE_KEY), 
         'pageNo': '1', 
@@ -243,28 +243,38 @@ def get_ingredient_api(drug_name):
         'type': 'json', 
         'item_name': drug_name
     }
+    
     try:
-        # 5초 안에 응답 없으면 끊기
         res = requests.get(URL_SEARCH, params=params, timeout=5)
         items = res.json().get('body', {}).get('items', [])
+        
         if items:
-            full_name = items[0].get('ITEM_NAME', '')
+            item = items[0]
+            full_name = item.get('ITEM_NAME', '')
+            class_name = item.get('CLASS_NAME', '기타 약물') # ✅ 분류명 추출
+            
             match = re.search(r'\((.*?)\)', full_name)
-            if match: return match.group(1)
-            else: return clean_drug_name(full_name)
-        return clean_drug_name(drug_name)
+            ingr_name = match.group(1) if match else clean_drug_name(full_name)
+            
+            return {"name": ingr_name, "category": class_name}
+
+        return {"name": clean_drug_name(drug_name), "category": "알 수 없음"}
+        
     except Exception as e:
-        print(f"API Error ({drug_name}): {e}") # 로그 출력
-        return drug_name
+        print(f"API Error: {e}")
+        return {"name": drug_name, "category": "에러"}
 
 # ==========================================
 # [기능 1] 상호작용 체크
 # ==========================================
 def check_interaction_pair(drug_A, drug_B):
-    clean_A = clean_drug_name(get_ingredient_api(drug_A))
-    clean_B = clean_drug_name(get_ingredient_api(drug_B))
+    # get_ingredient_api가 딕셔너리를 리턴하므로 ['name']을 써야 함
+    info_A = get_ingredient_api(drug_A)
+    info_B = get_ingredient_api(drug_B)
     
-    # ✅ [수정] unquote 적용 및 timeout 추가
+    clean_A = clean_drug_name(info_A['name'])
+    clean_B = clean_drug_name(info_B['name'])
+    
     params = {
         'serviceKey': unquote(SERVICE_KEY), 
         'pageNo': '1', 
@@ -274,7 +284,6 @@ def check_interaction_pair(drug_A, drug_B):
     }
     
     try:
-        # DUR 서버는 느릴 수 있으니 10초 대기
         res = requests.get(URL_DUR, params=params, timeout=10)
         items = res.json().get('body', {}).get('items', [])
         
@@ -293,21 +302,24 @@ def check_interaction_pair(drug_A, drug_B):
                     }
         return {"status": "SAFE"}
     except Exception as e:
-        print(f"DUR API Error: {e}") # 로그 출력
         return {"status": "ERROR", "msg": str(e)}
 
 # ==========================================
 # [기능 2] 영양소 체크
 # ==========================================
 def check_nutrient_data(drug_name):
-    # 여기에도 API 호출이 있으니 간접적으로 영향 받음 (get_ingredient_api 사용)
-    ingr = clean_drug_name(get_ingredient_api(drug_name))
+    api_result = get_ingredient_api(drug_name)
+    ingr = clean_drug_name(api_result['name'])
+    category = api_result['category'] # API가 준 분류 (예: 동맥경화용제)
+    
     info = NUTRIENT_DB.get(ingr)
     
     if info:
         return {
             "found": True,
             "ingredient": ingr,
+            # DB에 카테고리가 수동으로 적혀있으면 그걸 쓰고, 없으면 API 값을 씁니다.
+            "category": info.get('category', category), 
             "depletion": info['depletion'],
             "avoid": info['avoid'],
             "foods": info['foods']
@@ -315,5 +327,6 @@ def check_nutrient_data(drug_name):
     else:
         return {
             "found": False,
-            "ingredient": ingr
+            "ingredient": ingr,
+            "category": category # 약 정보가 DB에 없어도 분류는 알려줌!
         }
