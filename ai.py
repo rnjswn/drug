@@ -71,8 +71,8 @@ def get_ai_summary(drug_names: list[str]):
 
     try:
         response = client.chat.completions.create(
-            # [수정됨] 모델명을 Groq에서 무료로 제공하는 고성능 모델(Llama-3)로 변경
-            model="llama3-8b-8192", 
+           
+            model="llama-3.3-70b-versatile",
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
