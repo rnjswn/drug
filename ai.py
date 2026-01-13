@@ -1,6 +1,9 @@
+import os
 from openai import OpenAI
 import dur  # dur.py에서 데이터 조회
 
+api_key = os.environ.get("OPENAI_API_KEY")
+client = OpenAI(api_key=api_key)
 
 def get_ai_summary(drug_names: list[str]):
     context_lines = []
