@@ -3,7 +3,10 @@ from openai import OpenAI
 import dur  # dur.py에서 데이터 조회
 
 api_key = os.environ.get("GROQ_API_KEY")
-client = OpenAI(api_key=api_key)
+client = OpenAI(
+    api_key=api_key,
+    base_url="https://api.groq.com/openai/v1" 
+)
 
 def get_ai_summary(drug_names: list[str]):
     context_lines = []
