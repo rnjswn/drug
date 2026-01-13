@@ -2,7 +2,7 @@ import os
 from openai import OpenAI
 import dur  # dur.py에서 데이터 조회
 
-api_key = os.environ.get("OPENAI_API_KEY")
+api_key = os.environ.get("GROQ_API_KEY")
 client = OpenAI(api_key=api_key)
 
 def get_ai_summary(drug_names: list[str]):
@@ -68,7 +68,8 @@ def get_ai_summary(drug_names: list[str]):
 
     try:
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
+            # [수정됨] 모델명을 Groq에서 무료로 제공하는 고성능 모델(Llama-3)로 변경
+            model="llama3-8b-8192", 
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
