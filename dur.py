@@ -1,241 +1,54 @@
 import requests
 import re
 from urllib.parse import unquote
+import json
+
+try:
+    from dur_db import MANUAL_INGR_MAP, NUTRIENT_DB
+except ImportError:
+    MANUAL_INGR_MAP = {}
+    NUTRIENT_DB = {}
 
 # ==========================================
-# 설정 및 API 키
+# 1. 설정 및 API 키
 # ==========================================
 SERVICE_KEY = '5WH0LHB3CqNWF/SNt1NnxsTOxNIsAoqvl22JTUQS3EN/N3D+yXGcLCgfwFKX9qGLRgDJMTTKMUbHVokec8WxKA=='
 URL_SEARCH = 'http://apis.data.go.kr/1471000/MdcinGrnIdntfcInfoService03/getMdcinGrnIdntfcInfoList03'
 URL_DUR = 'https://apis.data.go.kr/1471000/DURIrdntInfoService03/getUsjntTabooInfoList02'
 
-NUTRIENT_DB = {
-    # 1. 만성질환
-    '메트포르민': {
-        'depletion': ['비타민 B12', '엽산(B9)', '코엔자임Q10'],
-        'avoid': ['과도한 음주 (젖산 산증 위험)'],
-        'foods': ['조개', '굴', '계란', '소고기', '시금치']
-    },
-    '글리메피리드': {
-        'depletion': ['코엔자임Q10'],
-        'avoid': ['음주 (저혈당 쇼크 위험)'],
-        'foods': ['고등어', '정어리', '땅콩', '브로콜리']
-    },
-    '글리클라지드': {
-        'depletion': ['코엔자임Q10'],
-        'avoid': ['음주'],
-        'foods': ['고등어', '정어리', '땅콩']
-    },
-    '아토르바스타틴': {
-        'depletion': ['코엔자임Q10'],
-        'avoid': ['자몽 주스 (약물 농도 증가 독성 위험)'],
-        'foods': ['소고기', '닭고기', '고등어', '두부']
-    },
-    '심바스타틴': {
-        'depletion': ['코엔자임Q10'],
-        'avoid': ['자몽 주스 (절대 금기)'],
-        'foods': ['소고기', '닭고기', '고등어', '두부']
-    },
-    '로수바스타틴': {
-        'depletion': ['코엔자임Q10'],
-        'avoid': ['자몽 주스 (주의)'],
-        'foods': ['소고기', '닭고기', '고등어']
-    },
-    '로바스타틴': {
-        'depletion': ['코엔자임Q10'],
-        'avoid': ['자몽 주스'],
-        'foods': ['소고기', '등푸른 생선']
-    },
-    '프라바스타틴': {
-        'depletion': ['코엔자임Q10'],
-        'avoid': ['자몽 주스'],
-        'foods': ['소고기', '등푸른 생선']
-    },
-    '아테놀롤': {
-        'depletion': ['코엔자임Q10', '멜라토닌'],
-        'avoid': [],
-        'foods': ['체리(멜라토닌)', '호두', '소고기']
-    },
-    '비소프롤롤': {
-        'depletion': ['코엔자임Q10', '멜라토닌'],
-        'avoid': [],
-        'foods': ['체리', '토마토', '등푸른 생선']
-    },
-    '프로프라놀롤': {
-        'depletion': ['코엔자임Q10', '멜라토닌'],
-        'avoid': [],
-        'foods': ['체리', '바나나', '소고기']
-    },
-    '암로디핀': {
-        'depletion': ['칼륨', '칼슘', '비타민 D'],
-        'avoid': ['자몽 주스 (약효 과다 발현 위험)'],
-        'foods': ['우유', '버섯', '바나나', '고구마']
-    },
-    '니페디핀': {
-        'depletion': ['칼슘', '비타민 D'],
-        'avoid': ['자몽 주스'],
-        'foods': ['멸치', '치즈', '연어']
-    },
-    '푸로세미드': {
-        'depletion': ['마그네슘', '칼륨', '아연', '비타민 B1(티아민)', '비타민 B6'],
-        'avoid': ['과도한 나트륨(소금)'],
-        'foods': ['바나나', '토마토', '감자', '돼지고기(B1)', '굴']
-    },
-    '히드로클로로티아지드': {
-        'depletion': ['마그네슘', '칼륨', '아연', '코엔자임Q10'],
-        'avoid': ['음주 (혈압 급강하 위험)'],
-        'foods': ['바나나', '시금치', '아몬드']
-    },
+def clean_drug_name(name: str) -> str:
+    if not name:
+        return ""
 
-    # 2. 통증 및 염증
-    '이부프로펜': {
-        'depletion': ['엽산(B9)', '비타민 C', '철분'],
-        'avoid': ['공복 복용 (위장 출혈 위험)', '음주'],
-        'foods': ['키위', '브로콜리', '붉은 살코기', '깻잎']
-    },
-    '덱시부프로펜': {
-        'depletion': ['엽산', '비타민 C', '철분'],
-        'avoid': ['공복 복용', '음주'],
-        'foods': ['키위', '오렌지', '소고기']
-    },
-    '나프록센': {
-        'depletion': ['엽산', '비타민 C', '철분'],
-        'avoid': ['공복 복용', '음주'],
-        'foods': ['딸기', '시금치', '선지']
-    },
-    '세레콕시브': {
-        'depletion': ['엽산', '비타민 C', '철분'],
-        'avoid': [],
-        'foods': ['녹색 잎채소', '감귤류']
-    },
-    '아스피린': {
-        'depletion': ['비타민 C', '칼슘', '철분', '엽산', '칼륨'],
-        'avoid': ['음주 (위장 출혈 위험 증가)'],
-        'foods': ['피망', '우유', '멸치', '바나나']
-    },
-    '아세트아미노펜': {
-        'depletion': ['글루타치온 (간 해독 효소)'],
-        'avoid': ['음주 (심각한 간 손상/독성 유발)', '과다 복용'],
-        'foods': ['마늘', '양파', '아스파라거스', '아보카도', '브로콜리']
-    },
-    '프레드니솔론': {
-        'depletion': ['칼슘', '비타민 D', '마그네슘', '아연', '칼륨', '비타민 C'],
-        'avoid': ['나트륨 (부종 악화)'],
-        'foods': ['우유', '연어', '아몬드', '바나나', '굴']
-    },
-    '덱사메타손': {
-        'depletion': ['칼슘', '비타민 D', '마그네슘', '칼륨'],
-        'avoid': ['짠 음식'],
-        'foods': ['치즈', '고구마', '견과류']
-    },
-    '콜키신': {
-        'depletion': ['비타민 B12', '마그네슘', '베타카로틴'],
-        'avoid': ['자몽 주스', '음주'],
-        'foods': ['조개', '다시마', '당근', '호박']
-    },
-
-    # 3. 소화기계
-    '오메프라졸': {
-        'depletion': ['비타민 B12', '마그네슘', '칼슘', '철분'],
-        'avoid': [],
-        'foods': ['조개', '김', '아몬드', '멸치', '소고기']
-    },
-    '에스오메프라졸': {
-        'depletion': ['비타민 B12', '마그네슘', '칼슘', '철분'],
-        'avoid': [],
-        'foods': ['조개', '시금치', '두부']
-    },
-    '라베프라졸': {
-        'depletion': ['비타민 B12', '마그네슘', '칼슘'],
-        'avoid': [],
-        'foods': ['해조류', '견과류', '유제품']
-    },
-    '파모티딘': {
-        'depletion': ['비타민 B12', '비타민 D', '엽산'],
-        'avoid': [],
-        'foods': ['생선', '계란', '버섯']
-    },
-
-    # 4. 정신신경계 및 뇌전증
-    '에스시탈로프람': {
-        'depletion': ['멜라토닌', '비타민 B2', '비타민 B6', '비타민 B12', '엽산'],
-        'avoid': ['음주 (약효 증폭 및 부작용)'],
-        'foods': ['체리', '돼지고기', '닭고기', '바나나']
-    },
-    '플루니트라제팜': {
-        'depletion': ['멜라토닌', '비타민 D', '엽산'],
-        'avoid': ['음주 (호흡 억제 위험)', '자몽 주스'],
-        'foods': ['체리', '연어', '시금치']
-    },
-    '트리아졸람': {
-        'depletion': ['멜라토닌', '비타민 B군'],
-        'avoid': ['자몽 주스', '음주'],
-        'foods': ['우유', '현미', '콩']
-    },
-    '발프로산': {
-        'depletion': ['비오틴(B7)', '비타민 D', '칼슘', '엽산', '카르니틴'],
-        'avoid': ['임의 중단 금지'],
-        'foods': ['계란 노른자(비오틴)', '버섯', '우유', '소고기']
-    },
-    '카바마제핀': {
-        'depletion': ['비오틴', '비타민 D', '칼슘', '엽산'],
-        'avoid': ['자몽 주스'],
-        'foods': ['콩', '연어', '치즈', '녹색 채소']
-    },
-    '가바펜틴': {
-        'depletion': ['비타민 B12', '비타민 D', '엽산'],
-        'avoid': ['제산제 (동시 복용 시 흡수 저해, 2시간 간격 필요)'],
-        'foods': ['조개', '계란', '브로콜리']
-    },
-
-    # 5. 기타
-    '에티닐에스트라디올': {
-        'depletion': ['비타민 B2', '비타민 B6', '비타민 B12', '엽산', '마그네슘', '아연', '셀레늄'],
-        'avoid': ['흡연 (혈전 위험 급증)'],
-        'foods': ['바나나', '참치', '굴', '견과류', '통곡물']
-    },
-    '미노사이클린': {
-        'depletion': ['유산균(프로바이오틱스)', '비타민 K', '비타민 B군', '아연', '마그네슘', '칼슘'],
-        'avoid': ['우유/유제품 (약 흡수 방해, 2시간 간격 섭취)', '제산제'],
-        'foods': ['김치/요거트(약 복용 후 섭취)', '녹색 채소(비타민K)', '굴']
-    },
-    '아목시실린': {
-        'depletion': ['유산균', '비타민 K'],
-        'avoid': [],
-        'foods': ['발효 식품', '브로콜리']
-    },
-    '이소트레티노인': {
-        'depletion': ['비타민 B12', '엽산', '비타민 D'],
-        'avoid': ['비타민 A 보충제 (비타민 A 독성 중복 위험)', '임신(기형 유발)'],
-        'foods': ['조개', '버섯', '계란']
-    },
-    '알렌드로네이트': {
-        'depletion': ['칼슘', '마그네슘', '인'],
-        'avoid': ['커피/카페인 (칼슘 배출)', '복용 직후 눕기(식도염 위험)'],
-        'foods': ['우유', '치즈', '멸치', '두부', '아몬드']
-    },
-    '와파린': {
-        'depletion': [],
-        'avoid': ['비타민 K 과다 섭취 주의(녹즙, 청국장, 콩물 등 - 약효 감소)', '크랜베리 주스'],
-        'foods': ['(일정한 식단 유지 중요)']
-    }
-}
-
-# ==========================================
-# 도구 함수
-# ==========================================
-def clean_drug_name(name):
-    if not name: return ""
     name = re.sub(r'\(.*?\)', '', name)
-    garbage_list = ['고체분산체', '염산염', '장용정', '서방정', '캡슐', '정', '연질', '수화물', '타르타르산염']
-    for garbage in garbage_list:
-        name = name.replace(garbage, '')
+    name = re.sub(
+        r'\d+(\.\d+)?\s*(mg|㎎|mcg|μg|ug|g|그램|밀리그램|밀리그람|밀리그렘|마이크로그램|%|단위|IU|UI)?',
+        '',
+        name,
+        flags=re.IGNORECASE
+    )
+    garbage_list = [
+        '타르타르산염', '브롬화수소산염', '메탄설폰산염', '메실산염', '베실산염', '캄실산염',
+        '아세테이트', '푸마르산염', '나파디실산염', '시트르산염', '석신산염', '숙신산염',
+        '염산염', '황산염', '인산염', '질산염', '말레산염', '탄산염', '오로트산염',
+        '나트륨', '칼륨', '칼슘', '마그네슘', '수화물', '무수물', '고체분산체',
+        '필름코팅정', '연질캡슐', '경질캡슐', '서방정', '장용정', '구강붕해정',
+        '현탁액', '현탁정', '점안액', '점이액', '스프레이', '나잘스프레이',
+        '시럽', '캡슐', '패치', '좌제', '과립', '세립', '분말', '정제',
+        '이알', '8시간', '엑스', '틴크', '유동', '건조',
+        '주', '액', '정', '산', '전', '후'
+    ]
+    garbage_list.sort(key=len, reverse=True)
+
+    for g in garbage_list:
+        name = name.replace(g, '')
+
+    name = re.sub(r'[.,]', '', name)
+    name = re.sub(r'\s+', ' ', name)
+
     return name.strip()
 
 def get_ingredient_api(drug_name):
-    """
-    약 이름을 받아 {성분명, 분류명}을 반환합니다.
-    """
     params = {
         'serviceKey': unquote(SERVICE_KEY), 
         'pageNo': '1', 
@@ -246,87 +59,103 @@ def get_ingredient_api(drug_name):
     
     try:
         res = requests.get(URL_SEARCH, params=params, timeout=5)
-        items = res.json().get('body', {}).get('items', [])
-        
-        if items:
-            item = items[0]
-            full_name = item.get('ITEM_NAME', '')
-            class_name = item.get('CLASS_NAME', '기타 약물') # ✅ 분류명 추출
-            
-            match = re.search(r'\((.*?)\)', full_name)
-            ingr_name = match.group(1) if match else clean_drug_name(full_name)
-            
-            return {"name": ingr_name, "category": class_name}
-
-        return {"name": clean_drug_name(drug_name), "category": "알 수 없음"}
-        
+        if res.status_code == 200:
+            items = res.json().get('body', {}).get('items', [])
+            if items:
+                item = items[0]
+                class_name = item.get('CLASS_NAME', '기타 약물')
+                
+                real_ingr = item.get('MAIN_ITEM_INGR') or item.get('INGR_NAME')
+                if real_ingr:
+                    first_ingr = re.split(r'[|,\+]', real_ingr)[0]
+                    return {"name": first_ingr, "category": class_name}
+                
+                match = re.search(r'\((.*?)\)', item.get('ITEM_NAME', ''))
+                if match:
+                    return {"name": match.group(1), "category": class_name}
     except Exception as e:
         print(f"API Error: {e}")
-        return {"name": drug_name, "category": "에러"}
 
-# ==========================================
-# [기능 1] 상호작용 체크
-# ==========================================
+    if drug_name in MANUAL_INGR_MAP:
+        return {"name": MANUAL_INGR_MAP[drug_name], "category": "일반의약품(수동)"}
+    
+    clean_input = clean_drug_name(drug_name)
+    if clean_input in MANUAL_INGR_MAP:
+         return {"name": MANUAL_INGR_MAP[clean_input], "category": "일반의약품(수동)"}
+
+    return {"name": clean_drug_name(drug_name), "category": "알 수 없음"}
+
 def check_interaction_pair(drug_A, drug_B):
-    # get_ingredient_api가 딕셔너리를 리턴하므로 ['name']을 써야 함
-    info_A = get_ingredient_api(drug_A)
-    info_B = get_ingredient_api(drug_B)
-    
-    clean_A = clean_drug_name(info_A['name'])
-    clean_B = clean_drug_name(info_B['name'])
-    
-    params = {
-        'serviceKey': unquote(SERVICE_KEY), 
-        'pageNo': '1', 
-        'numOfRows': '100', 
-        'type': 'json', 
-        'ingrKorName': clean_A
-    }
-    
     try:
+        info_A = get_ingredient_api(drug_A)
+        info_B = get_ingredient_api(drug_B)
+
+        clean_A = clean_drug_name(info_A['name'])
+        clean_B = clean_drug_name(info_B['name'])
+
+        params = {
+            'serviceKey': unquote(SERVICE_KEY),
+            'pageNo': '1',
+            'numOfRows': '100',
+            'type': 'json',
+            'ingrKorName': clean_A
+        }
+
         res = requests.get(URL_DUR, params=params, timeout=10)
         items = res.json().get('body', {}).get('items', [])
-        
+
         if items:
             for item in items:
-                real_data = item.get('item') if 'item' in item else item
-                taboo_name = real_data.get('MIXTURE_INGR_KOR_NAME', '')
-                taboo_clean = clean_drug_name(taboo_name)
-                
-                if taboo_clean and (clean_B in taboo_clean or taboo_clean in clean_B):
+                real = item.get('item', item)
+                taboo = clean_drug_name(real.get('MIXTURE_INGR_KOR_NAME', ''))
+
+                if taboo and (clean_B in taboo or taboo in clean_B):
                     return {
                         "status": "DANGER",
                         "pair": [drug_A, drug_B],
-                        "cause": f"{real_data.get('INGR_KOR_NAME')} + {taboo_name}", 
-                        "content": real_data.get('PROHBT_CONTENT')
+                        "cause": f"{real.get('INGR_KOR_NAME')} + {real.get('MIXTURE_INGR_KOR_NAME')}",
+                        "content": real.get('PROHBT_CONTENT')
                     }
+
         return {"status": "SAFE"}
+
     except Exception as e:
         return {"status": "ERROR", "msg": str(e)}
 
-# ==========================================
-# [기능 2] 영양소 체크
-# ==========================================
 def check_nutrient_data(drug_name):
     api_result = get_ingredient_api(drug_name)
-    ingr = clean_drug_name(api_result['name'])
-    category = api_result['category'] # API가 준 분류 (예: 동맥경화용제)
+    raw_ingr = api_result['name']
+    category_name = api_result['category']
+    cleaned_ingr = clean_drug_name(raw_ingr)
     
-    info = NUTRIENT_DB.get(ingr)
+
+    target_info = None
+    final_ingr_name = raw_ingr 
+
+    if cleaned_ingr in NUTRIENT_DB:
+        target_info = NUTRIENT_DB[cleaned_ingr]
+        final_ingr_name = cleaned_ingr
     
-    if info:
+    elif raw_ingr in NUTRIENT_DB:
+        target_info = NUTRIENT_DB[raw_ingr]
+        final_ingr_name = raw_ingr
+        
+    elif raw_ingr.replace(" ", "") in NUTRIENT_DB:
+        target_info = NUTRIENT_DB[raw_ingr.replace(" ", "")]
+        final_ingr_name = raw_ingr.replace(" ", "")
+
+    if target_info:
         return {
             "found": True,
-            "ingredient": ingr,
-            # DB에 카테고리가 수동으로 적혀있으면 그걸 쓰고, 없으면 API 값을 씁니다.
-            "category": info.get('category', category), 
-            "depletion": info['depletion'],
-            "avoid": info['avoid'],
-            "foods": info['foods']
+            "ingredient": final_ingr_name,           
+            "category": target_info.get('category', category_name),
+            "depletion": target_info.get('depletion', []),
+            "avoid": target_info.get('avoid', []),
+            "foods": target_info.get('foods', [])
         }
     else:
         return {
             "found": False,
-            "ingredient": ingr,
-            "category": category # 약 정보가 DB에 없어도 분류는 알려줌!
+            "ingredient": raw_ingr,                   
+            "category": category_name
         }
